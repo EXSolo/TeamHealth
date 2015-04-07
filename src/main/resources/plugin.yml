@@ -1,0 +1,10 @@
+name: TeamHealth
+version: 0.1
+description: TeamHealth UHC extention
+author: EXSolo
+website: www.exsoloscript.com
+
+main: com.exsoloscript.teamhealth.TeamHealth
+commands:
+
+depend: [UltraHardcore]
