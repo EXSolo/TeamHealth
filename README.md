@@ -6,3 +6,4 @@ This short tutorial will show you how to use it:
 * You can access the feature by typing `/feature on/off/toggle TeamHealth`.
   By doing this the `PlayerList feature` will be disabled if it was enabled before
 * Make sure not to reenable the `PlayerList feature` while the `TeamHealth feature` is enabled.
+* If the feature is acting weird after a reload just disable and enable it again
