@@ -1,11 +1,8 @@
 package com.exsoloscript.teamhealth.util;
 
-import com.exsoloscript.teamhealth.YamlUtil;
 import com.google.common.base.Optional;
 import com.publicuhc.uhc.framework.configuration.Configurator;
 import com.publicuhc.uhc.framework.configuration.events.ConfigFileReloadedEvent;
-import com.publicuhc.uhc.framework.shaded.javax.Inject;
-import com.publicuhc.uhc.framework.shaded.javax.Named;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 
@@ -19,7 +16,7 @@ public class UHCConfigurator implements Configurator {
     private final File dataFolder;
     private final ClassLoader classLoader;
 
-    protected UHCConfigurator(File dataFolder, ClassLoader classLoader) {
+    public UHCConfigurator(File dataFolder, ClassLoader classLoader) {
         this.dataFolder = dataFolder;
         this.classLoader = classLoader;
     }

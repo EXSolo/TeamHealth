@@ -1,34 +1,30 @@
 package com.exsoloscript.teamhealth;
 
+import com.exsoloscript.teamhealth.event.FeatureListener;
+import com.exsoloscript.teamhealth.util.UHCConfigurator;
+import com.publicuhc.ultrahardcore.UltraHardcore;
+import com.publicuhc.ultrahardcore.features.exceptions.FeatureIDConflictException;
+import com.publicuhc.ultrahardcore.features.exceptions.InvalidFeatureIDException;
+import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
-import uk.co.eluinhost.UltraHardcore.config.ConfigHandler;
-import uk.co.eluinhost.UltraHardcore.exceptions.FeatureIDConflictException;
-import uk.co.eluinhost.UltraHardcore.exceptions.InvalidFeatureIDException;
-import uk.co.eluinhost.UltraHardcore.features.FeatureManager;
-import uk.co.eluinhost.UltraHardcore.features.UHCFeature;
-import uk.co.eluinhost.UltraHardcore.features.UHCFeatureList;
-
-import java.lang.reflect.Field;
-import java.util.logging.Level;
 
 public class TeamHealth extends JavaPlugin {
 
     public void onEnable() {
-        loadConfig();
+        UltraHardcore uhc = (UltraHardcore) Bukkit.getPluginManager().getPlugin("UltraHardcore");
 
-        UHCFeature f = new TeamHealthFeature(ConfigHandler.getConfig(0).getBoolean("features.teamHealth.enabled"));
+        // Register the event
+        Bukkit.getPluginManager().registerEvents(new FeatureListener(uhc.getFeatureManager()), this);
+
+        // Register the feature
+        TeamHealthFeature f = new TeamHealthFeature(this, new UHCConfigurator(uhc.getDataFolder(), uhc.getClass().getClassLoader()), null);
 
         try {
-            FeatureManager.addFeature(f);
-        } catch (FeatureIDConflictException e) {
-            getLogger().log(Level.SEVERE, "A different plugin is using the feature name TeamHealth already, disabling");
-        } catch (InvalidFeatureIDException e) {
-            getLogger().log(Level.SEVERE, "The feature ID is invalid. Is the plugin up-to-date?");
+            uhc.getFeatureManager().addFeature(f);
+        } catch (FeatureIDConflictException ignored) {
+            getLogger().severe("TeamHealth Feature ID is conflicting, did you install the latest version?");
+        } catch (InvalidFeatureIDException ignored) {
+            getLogger().severe("TeamHealth feature ID is invalid, this should never happen!");
         }
-    }
-
-    private void loadConfig() {
-        ConfigHandler.getConfig(0).addDefault("features.teamHealth.enabled", false);
-        ConfigHandler.saveConfig(0);
     }
 }

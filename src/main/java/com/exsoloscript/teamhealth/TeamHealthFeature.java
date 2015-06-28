@@ -1,81 +1,131 @@
 package com.exsoloscript.teamhealth;
 
+import com.publicuhc.uhc.framework.configuration.Configurator;
+import com.publicuhc.uhc.framework.shaded.javax.Inject;
+import com.publicuhc.uhc.framework.translate.Translate;
+import com.publicuhc.ultrahardcore.pluginfeatures.UHCFeature;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.scoreboard.DisplaySlot;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
-import uk.co.eluinhost.UltraHardcore.UltraHardcore;
-import uk.co.eluinhost.UltraHardcore.config.ConfigHandler;
-import uk.co.eluinhost.UltraHardcore.exceptions.FeatureIDNotFoundException;
-import uk.co.eluinhost.UltraHardcore.exceptions.FeatureStateNotChangedException;
-import uk.co.eluinhost.UltraHardcore.features.FeatureManager;
-import uk.co.eluinhost.UltraHardcore.features.UHCFeature;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.WeakHashMap;
-import java.util.logging.Level;
 
 public class TeamHealthFeature extends UHCFeature {
 
-    private static int task_id = -1;
-    private static WeakHashMap<Team, Double> players = new WeakHashMap<>();
-    private static final int health_scaling = ConfigHandler.getConfig(0).getInt("features.playerListHealth.scaling");
-    private static final boolean round_health = ConfigHandler.getConfig(0).getBoolean("features.playerListHealth.roundHealth");
-    private static Scoreboard board = null;
-    private static Objective obj_player_list = null;
-    private static Objective obj_player_name = null;
+    public static final String PLAYER_LIST_HEALTH = BASE_PERMISSION + "playerListHealth";
 
-    public TeamHealthFeature(boolean b) {
-        super(b);
-        setFeatureID("TeamHealth");
-        setDescription("The health of all players in a team shown in player list");
+    //the internal bukkit id for the task
+    private int m_taskID = -1;
+
+    //the list of players and their health that we are handling
+    private static final Map<Team, Double> HANDLED_PLAYERS = new WeakHashMap<Team, Double>();
+
+    private static final Scoreboard MAIN_SCOREBOARD = Bukkit.getScoreboardManager().getMainScoreboard();
+
+    private static final int MAX_LENGTH_COLOURS = 14;
+    private static final int MAX_LENGTH_NO_COLOURS = 16;
+
+    private static final String OBJECTIVE_SCOREBOARD_NAME = "UHCHealth";
+    private static final String OBJECTIVE_UNDER_NAME_NAME = "UHCHealthName";
+    private static final String OBJECTIVE_TYPE = "dummy";
+
+    private Objective m_objectivePlayerList;
+    private Objective m_objectiveUnderName;
+
+    /**
+     * Handles the player list health better than base mc, normal behaviour when disabled
+     *
+     * @param plugin        the plugin
+     * @param configManager the config manager
+     * @param translate     the translator
+     */
+    @Inject
+    public TeamHealthFeature(Plugin plugin, Configurator configManager, Translate translate) {
+        super(plugin, configManager, translate);
     }
 
-    public static void updatePlayerListHealth(Player player, double health) {
-        String str = ChatColor.stripColor(player.getDisplayName());
-        int players = 1;
-        Team t = Bukkit.getScoreboardManager().getMainScoreboard().getPlayerTeam(player);
-        if (t != null) {
-            players = t.getPlayers().size();
+    /**
+     * update the players name in the list with the following health number
+     *
+     * @param player the player to update
+     * @param health the health value to update to
+     */
+    public void updatePlayerListHealth(Player player, double health) {
+        FileConfiguration config = getConfigManager().getConfig("main");
+
+        String playerName = config.getBoolean(getBaseConfig() + "displayNames") ? player.getDisplayName() : player.getName();
+        //get the players display name and strip the colour codes from it
+        String newName = ChatColor.stripColor(playerName);
+
+        boolean useColours = config.getBoolean(getBaseConfig() + "colours");
+
+        int playerAmount = 1;
+        Team team = Bukkit.getScoreboardManager().getMainScoreboard().getPlayerTeam(player);
+        if (team != null) {
+            playerAmount = team.getPlayers().size();
         }
 
-        if (ConfigHandler.getConfig(0).getBoolean("features.playerListHealth.colours")) {
-            str = str.substring(0, Math.min(str.length(), 14));
-            if (!player.hasPermission("UHC.playerListHealth")) {
-                str = ChatColor.BLUE + str;
-                health = 0;
-            } else if (health <= (players * 6)) {
-                str = ChatColor.RED + str;
-            } else if (health <= (players * 12)) {
-                str = ChatColor.YELLOW + str;
-            } else {
-                str = ChatColor.GREEN + str;
+        //cut the name down to the right length
+        newName = newName.substring(0, Math.min(newName.length(), useColours ? MAX_LENGTH_COLOURS : MAX_LENGTH_NO_COLOURS));
+
+        double showHealth = health;
+
+        if (useColours) {
+            ChatColor prefix = ChatColor.GREEN;
+            if (health <= (playerAmount * 12)) {
+                prefix = ChatColor.YELLOW;
+            } else if (health <= (playerAmount * 6)) {
+                prefix = ChatColor.RED;
+            } else if (health == 0) {
+                prefix = ChatColor.GRAY;
             }
-        } else {
-            str = str.substring(0, Math.min(str.length(), 16));
-        }
-        player.setPlayerListName(str);
-        if (round_health) {
-            health = Math.ceil(health);
+
+            if (!player.hasPermission(PLAYER_LIST_HEALTH)) {
+                prefix = ChatColor.BLUE;
+                showHealth = 0.0D;
+            }
+            newName = prefix + newName;
         }
 
-        // Fallback for older versions
-        obj_player_list.getScore(Bukkit.getOfflinePlayer(str)).setScore((int) (health * health_scaling));
-        obj_player_name.getScore(Bukkit.getOfflinePlayer(ChatColor.stripColor(player.getDisplayName()))).setScore((int) (health * health_scaling));
+        //set the player list name
+        player.setPlayerListName(newName);
+
+        //if we're rounding health
+        if (config.getBoolean(getBaseConfig() + "roundHealth")) {
+            showHealth = Math.ceil(showHealth);
+        }
+
+        double healthScaling = config.getDouble(getBaseConfig() + "scaling");
+        //set the score for both the player and their display name
+        //this allows the score to show under the head of players with a changed name
+        m_objectivePlayerList.getScore(newName).setScore((int) (showHealth * healthScaling));
+        m_objectiveUnderName.getScore(ChatColor.stripColor(playerName)).setScore((int) (showHealth * healthScaling));
     }
 
-    public static void updatePlayers(Player[] players) {
+    /**
+     * Update all the players supplied
+     *
+     * @param players Player[]
+     */
+    public void updatePlayers(Player[] players) {
         for (Player p : players) {
             Team t = Bukkit.getScoreboardManager().getMainScoreboard().getPlayerTeam(p);
-            Double health = TeamHealthFeature.players.get(t);
+            Double health = HANDLED_PLAYERS.get(t);
             double newHealth = 0;
 
             if (t != null) {
                 if (health == null) {
-                    TeamHealthFeature.players.put(t, newHealth);
+                    HANDLED_PLAYERS.put(t, newHealth);
                 }
 
                 for (OfflinePlayer op : t.getPlayers()) {
@@ -93,70 +143,104 @@ public class TeamHealthFeature extends UHCFeature {
         }
     }
 
-    public void enableFeature() {
-        ConfigHandler.getConfig(0).set("features.teamHealth.enabled", true);
-        ConfigHandler.saveConfig(0);
-
-        try {
-            FeatureManager.getFeature("PlayerList").setEnabled(false);
-        } catch (FeatureIDNotFoundException e) {
-            Bukkit.getLogger().log(Level.SEVERE, "PlayerList feature was not found. Did you install the latest version?");
-        } catch (FeatureStateNotChangedException e) {
-            Bukkit.getLogger().log(Level.SEVERE, "PlayerList feature was not toggled. Please contact a developer");
-        }
-
-        task_id = Bukkit.getScheduler().scheduleSyncRepeatingTask(UltraHardcore.getInstance(), new Runnable() {
-            public void run() {
-                TeamHealthFeature.updatePlayers(Bukkit.getOnlinePlayers());
-            }
-        }, 1L, ConfigHandler.getConfig(0).getInt("features.playerListHealth.delay"));
-
+    @Override
+    protected void enableCallback() {
+        //set up the timer that runs
+        m_taskID = Bukkit.getScheduler().scheduleSyncRepeatingTask(
+                getPlugin(),
+                new PlayerListUpdater(),
+                1L,
+                getConfigManager().getConfig("main").getLong(getBaseConfig() + "delay")
+        );
+        //intialize the scoreboard
         initializeScoreboard();
     }
 
-    public void disableFeature() {
-        ConfigHandler.getConfig(0).set("features.teamHealth.enabled", false);
-        ConfigHandler.saveConfig(0);
-
-        if (task_id >= 0) {
-            Bukkit.getScheduler().cancelTask(task_id);
-            task_id = -1;
+    @Override
+    protected void disableCallback() {
+        //disable the task if its running
+        if (m_taskID >= 0) {
+            Bukkit.getScheduler().cancelTask(m_taskID);
+            m_taskID = -1;
         }
-        if (board != null) {
-            board.clearSlot(DisplaySlot.PLAYER_LIST);
-            board.clearSlot(DisplaySlot.BELOW_NAME);
+        //if the scoreboard is there
+        if (MAIN_SCOREBOARD != null) {
+            //clear the slots we use
+            MAIN_SCOREBOARD.clearSlot(DisplaySlot.PLAYER_LIST);
+            MAIN_SCOREBOARD.clearSlot(DisplaySlot.BELOW_NAME);
+            //reset the player list name for all online players to their name
             for (Player p : Bukkit.getOnlinePlayers()) {
-                p.setPlayerListName(p.getDisplayName());
+                p.setPlayerListName(p.getName());
             }
         }
     }
 
+    /**
+     * Initialize our scoreboard
+     */
     private void initializeScoreboard() {
+        //try to make new objectives, throws exception when it already exists
         try {
-            board.registerNewObjective("UHCHealth", "dummy");
+            MAIN_SCOREBOARD.registerNewObjective(OBJECTIVE_SCOREBOARD_NAME, OBJECTIVE_TYPE);
+        } catch (IllegalArgumentException ignored) {
+        }
+        try {
+            MAIN_SCOREBOARD.registerNewObjective(OBJECTIVE_UNDER_NAME_NAME, OBJECTIVE_TYPE);
         } catch (IllegalArgumentException ignored) {
         }
 
-        try {
-            board.registerNewObjective("UHCHealthName", "dummy");
-        } catch (IllegalArgumentException ignored) {
-        }
+        //set the objectives we created
+        m_objectivePlayerList = MAIN_SCOREBOARD.getObjective(OBJECTIVE_SCOREBOARD_NAME);
+        m_objectiveUnderName = MAIN_SCOREBOARD.getObjective(OBJECTIVE_UNDER_NAME_NAME);
 
-        obj_player_list = board.getObjective("UHCHealth");
-        obj_player_name = board.getObjective("UHCHealthName");
-        obj_player_name.setDisplayName(ChatColor.translateAlternateColorCodes('&', ConfigHandler.getConfig(0).getString("features.playerListHealth.belowNameUnit")).replaceAll("&h", "\u2665"));
-        obj_player_list.setDisplaySlot(DisplaySlot.PLAYER_LIST);
-        if (ConfigHandler.getConfig(0).getBoolean("features.playerListHealth.belowName")) {
-            obj_player_name.setDisplaySlot(DisplaySlot.BELOW_NAME);
+        FileConfiguration config = getConfigManager().getConfig("main");
+
+        //set the display name of the under name objective
+        m_objectiveUnderName.setDisplayName(ChatColor.translateAlternateColorCodes('&', config.getString(getBaseConfig() + "belowNameUnit")).replaceAll("&h", "\u2665"));
+
+        //set the slot for player list health
+        m_objectivePlayerList.setDisplaySlot(DisplaySlot.PLAYER_LIST);
+
+        //if under name is enabled
+        if (config.getBoolean(getBaseConfig() + "belowName")) {
+            //set it's slot
+            m_objectiveUnderName.setDisplaySlot(DisplaySlot.BELOW_NAME);
         } else {
-            Objective localObjective = board.getObjective(DisplaySlot.BELOW_NAME);
-            if ((localObjective != null) && (localObjective.getName().equals("UHCHealthName"))) {
-                board.clearSlot(DisplaySlot.BELOW_NAME);
+            //get the objective that is below the name
+            Objective o = MAIN_SCOREBOARD.getObjective(DisplaySlot.BELOW_NAME);
+            //if its our objective clear the slot
+            if (o != null && o.getName().equals(OBJECTIVE_UNDER_NAME_NAME)) {
+                MAIN_SCOREBOARD.clearSlot(DisplaySlot.BELOW_NAME);
             }
         }
     }
 
-    static {
-        board = Bukkit.getScoreboardManager().getMainScoreboard();
+    @Override
+    public String getBaseConfig() {
+        return BASE_CONFIG + "PlayerList.";
+    }
+
+    @Override
+    public String getFeatureID() {
+        return "TeamHealth";
+    }
+
+    @Override
+    public String getDescription() {
+        return "Player's health shown in player list and under their name";
+    }
+
+    @Override
+    public List<String> getStatus() {
+        List<String> status = new ArrayList<String>();
+        status.add(ChatColor.GRAY + "--- See the PlayerList status");
+        return status;
+    }
+
+    private class PlayerListUpdater implements Runnable {
+        @Override
+        public void run() {
+            updatePlayers(Bukkit.getOnlinePlayers());
+        }
     }
 }
